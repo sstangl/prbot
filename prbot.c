@@ -89,7 +89,7 @@ main(int argc, char *argv[])
 		return 1;
 	}
 
-	irc_nick(fd, "PRBot7", NULL);
+	irc_nick(fd, "prbot", NULL);
 	irc_join(fd, "#prbottest");
 
 	char *line;

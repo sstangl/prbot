@@ -50,6 +50,20 @@ static const char INITIALIZE_DB[] =
     "    kgs REAL NOT NULL"
     ");";
 
+static const char TOP_PRS[] =
+    "SELECT * "
+    "FROM "
+    "   (SELECT nick, lift, date, sets, reps, kgs"
+    "    FROM prs"
+    "    WHERE nick = ?"
+    "    ORDER BY date DESC) "
+    "GROUP BY lift, nick "
+    "ORDER BY lift ASC;";
+
+static const char INSERT_PR[] =
+    "INSERT INTO prs (nick, lift, date, sets, reps, kgs)"
+    "VALUES (?, ?, ?, ?, ?, ?)";
+
 static const char *LIFTS[] = {
     "bench press",
     "overhead press",
@@ -86,9 +100,7 @@ static bool
 insert_pr(struct prbot_pr *pr)
 {
     sqlite3_stmt *stmt;
-    if (sqlite3_prepare(db, "INSERT INTO prs (nick, lift, date, sets, reps, kgs)"
-                            "VALUES (?, ?, ?, ?, ?, ?)",
-                        -1, &stmt, NULL) != SQLITE_OK) {
+    if (sqlite3_prepare(db, INSERT_PR, -1, &stmt, NULL) != SQLITE_OK) {
         // Something broke. :(
         return false;
     }
@@ -204,11 +216,18 @@ handle_cmd_record(int fd, struct ircmsg_privmsg *msg, char *head)
     }
 
     // Normalize nicknames to lowercase, so we don't get duplicates of nicknames.
-    char nick_lower[1024];
+    char nick_lower[BUF_LEN];
     strcpy(nick_lower, msg->name.nick);
 
     for (char *c = nick_lower; *c != '\0'; ++c) {
         *c = tolower(*c);
+    }
+
+    // TODO: remove me later and use a proper verification thing
+    if (strcmp(nick_lower, "number1stunna")) {
+        irc_privmsg(fd, msg->chan, "%s: haha, no.",
+                    msg->name.nick);
+        return false;
     }
 
     pr.nick = nick_lower;
@@ -228,8 +247,75 @@ handle_cmd_record(int fd, struct ircmsg_privmsg *msg, char *head)
 
 static bool
 handle_cmd_records(int fd, struct ircmsg_privmsg *msg, char *head) {
-    irc_privmsg(fd, msg->chan, "%s: records not implemented",
-                msg->name.nick);
+    // Normalize the nickname to lowercase, because that's what we do.
+    for (char *c = head; *c != '\0'; ++c) {
+        *c = tolower(*c);
+        if (*c == '\r' || *c == '\n') {
+            *c = '\0';
+            break;
+        }
+    }
+
+    sqlite3_stmt *stmt;
+    char out[BUF_LEN] = "\0";
+    char *cur = out;
+
+    if (sqlite3_prepare(db, TOP_PRS, -1, &stmt, NULL) != SQLITE_OK) {
+        // Something broke. :(
+        irc_privmsg(fd, msg->chan, "%s: sorry, couldn't get PRs (prepare)");
+        return false;
+    }
+
+    sqlite3_bind_text(stmt, 1, head, strlen(head), NULL);
+
+    int retval;
+    do {
+        switch ((retval = sqlite3_step(stmt))) {
+            case SQLITE_DONE:
+                break;
+
+            case SQLITE_ROW: {
+                // There are 6 columns:
+                //
+                // 0. nick
+                // 1. lift
+                // 2. date
+                // 3. sets
+                // 4. reps
+                // 5. kgs
+                const char *nick = (const char *) sqlite3_column_text(stmt, 0);
+                const char *lift = (const char *) sqlite3_column_text(stmt, 1);
+                long date = (long) sqlite3_column_int64(stmt, 2);
+                int sets = sqlite3_column_int(stmt, 3);
+                int reps = sqlite3_column_int(stmt, 4);
+                double kgs = sqlite3_column_double(stmt, 5);
+
+                int n = snprintf(cur, BUF_LEN - (int) (cur - out), "| %s of %.2fkg %dx%d ", lift, kgs, sets, reps);
+                if (n < 0) {
+                    // TODO: split output over multiple lines, rather than just silencing it
+                    goto finalize;
+                }
+                cur += n;
+
+                break;
+           }
+
+            default:
+                // Some error occured during PR retrieval.
+                irc_privmsg(fd, msg->chan, "%s: sorry, couldn't get PRs (iterate)");
+                return false;
+        }
+    } while (retval == SQLITE_ROW);
+
+finalize:
+    if (sqlite3_finalize(stmt)) {
+        // Couldn't finalize statement.
+        irc_privmsg(fd, msg->chan, "%s: sorry, couldn't get PRs (finalize)");
+        return false;
+    }
+
+    irc_privmsg(fd, msg->chan, "PRs for %s %s",
+                head, out[0] == '\0' ? "| none" : out);
     return false;
 }
 

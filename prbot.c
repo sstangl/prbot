@@ -17,16 +17,137 @@
  * along with PRBot.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#define _GNU_SOURCE
+
 #include <assert.h>
+#include <ctype.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
+#include <sqlite3.h>
+#include <regex.h>
 
 #include "irc.h"
 
 #define BUF_LEN 1024
+
+#define DATABASE_NAME "prbot.sqlite3"
+#define IRC_HOST "irc.rizon.net"
+#define IRC_PORT "6667"
+#define IRC_NICK "prbot"
+#define IRC_CHANNEL "#prbottest"
+
+static char INITIALIZE_DB[] =
+    "CREATE TABLE IF NOT EXISTS prs ("
+    "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "    nick VARCHAR(255) NOT NULL,"
+    "    lift VARCHAR(255) NOT NULL,"
+    "    date INTEGER NOT NULL,"
+    "    sets INTEGER NOT NULL,"
+    "    reps INTEGER NOT NULL,"
+    "    kgs REAL NOT NULL"
+    ");";
+
+struct prbot_pr {
+    const char *nick;
+    const char *lift;
+    time_t date;
+    int sets;
+    int reps;
+    double kgs;
+};
+
+static double inline
+kg2lb(double kgs)
+{
+    return kgs * 2.205;
+}
+
+static double inline
+lb2kg(double lbs)
+{
+    return lbs / 2.205;
+}
+
+// Global database handle ( :( ).
+static sqlite3 *db;
+
+static bool
+insert_pr(struct prbot_pr *pr)
+{
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare(db, "INSERT INTO prs (nick, lift, date, sets, reps, kgs)"
+                            "VALUES (?, ?, ?, ?, ?, ?)",
+                        -1, &stmt, NULL) != SQLITE_OK) {
+        // Something broke. :(
+        return false;
+    }
+    sqlite3_bind_text(stmt, 1, pr->nick, strlen(pr->nick), NULL);
+    sqlite3_bind_text(stmt, 2, pr->lift, strlen(pr->lift), NULL);
+    sqlite3_bind_int64(stmt, 3, (sqlite3_int64) pr->date);
+    sqlite3_bind_int(stmt, 4, pr->sets);
+    sqlite3_bind_int(stmt, 5, pr->reps);
+    sqlite3_bind_double(stmt, 6, pr->kgs);
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        // Couldn't run this statement.
+        return false;
+    }
+    if (sqlite3_finalize(stmt)) {
+        // Couldn't finalize statement.
+        return false;
+    };
+    return true;
+}
+
+static const char NEW_PR_PATTERN[] = "^(.+) of ([0-9]+)(\\.[0-9]+)?(kg|lb) ([0-9]+)x([0-9]+)";
+static regex_t new_pr_regex;
+
+static bool
+tryparse_pr(char *msg, struct prbot_pr *pr)
+{
+#define NUM_MATCHES 7
+    // There are 7 match groups:
+    //
+    //   0. full string
+    //   1. lift
+    //   2. weight (whole part)
+    //   3. weight (decimal part)
+    //   4. unit
+    //   5. sets
+    //   6. reps
+    regmatch_t matches[NUM_MATCHES];
+
+    if (regexec(&new_pr_regex, msg, NUM_MATCHES, matches, 0)) {
+        return false;
+    }
+
+    // The regexp will match the unit, so if we match we can assume that we
+    // got either kg or lb.
+    bool needs_conv_from_lb = msg[matches[4].rm_so] == 'l';
+
+    // Null-terminate some parts of the string so they can be parsed.
+    for (size_t i = 0; i < NUM_MATCHES; ++i) {
+        if (i == 2) {
+            // But don't null-terminate the whole weight.
+            continue;
+        }
+        msg[matches[i].rm_eo] = '\0';
+    }
+#undef NUM_MATCHES
+
+    pr->lift = msg + matches[1].rm_so;
+    pr->kgs = atof(msg + matches[2].rm_so);
+    if (needs_conv_from_lb) {
+        pr->kgs = lb2kg(pr->kgs);
+    }
+    pr->sets = atoi(msg + matches[5].rm_so);
+    pr->reps = atoi(msg + matches[6].rm_so);
+    return true;
+}
 
 static bool
 handle_ping(int fd, struct ircmsg_ping *ping)
@@ -48,10 +169,61 @@ handle_join(int fd, struct ircmsg_join *join)
 }
 
 static bool
+handle_cmd_record(int fd, struct ircmsg_privmsg *msg, char *head)
+{
+    struct prbot_pr pr;
+
+    if (!tryparse_pr(head, &pr)) {
+        irc_privmsg(fd, msg->chan, "%s: check your syntax, expected: "
+                                   "<lift> of <weight><unit> <sets>x<reps>",
+                    msg->name.nick);
+        return false;
+    }
+
+    // Normalize nicknames to lowercase, so we don't get duplicates of nicknames.
+    char nick_lower[1024];
+    strcpy(nick_lower, msg->name.nick);
+
+    for (char *c = nick_lower; *c != '\0'; ++c) {
+        *c = tolower(*c);
+    }
+
+    pr.nick = nick_lower;
+    pr.date = time(NULL);
+
+    if (!insert_pr(&pr)) {
+        irc_privmsg(fd, msg->chan, "%s: couldn't record your PR, try again later :(",
+                    msg->name.nick);
+        return false;
+    }
+
+    irc_privmsg(fd, msg->chan, "%s: recorded your PR for %s of %.2fkg %dx%d",
+                msg->name.nick, pr.lift, pr.kgs, pr.sets, pr.reps);
+
+    return true;
+}
+
+static bool
+handle_cmd_records(int fd, struct ircmsg_privmsg *msg, char *head) {
+    irc_privmsg(fd, msg->chan, "%s: records not implemented",
+                msg->name.nick);
+    return false;
+}
+
+static bool
 handle_privmsg(int fd, struct ircmsg_privmsg *msg)
 {
-	if (strstr(msg->text, "PRBot7: ") == msg->text && msg->chan[0] == '#')
-		irc_privmsg(fd, msg->chan, "%s: shut the fuck up.", msg->name.nick);
+	if (strstr(msg->text, IRC_NICK ": ") == msg->text && msg->chan[0] == '#') {
+        char *head = msg->text + strlen(IRC_NICK) + 2;
+
+        if (strstr(head, "record ") == head) {
+            handle_cmd_record(fd, msg, head + 7);
+        } else if (strstr(head, "records ") == head) {
+            handle_cmd_records(fd, msg, head + 8);
+        } else {
+            irc_privmsg(fd, msg->chan, "%s: shut the fuck up.", msg->name.nick);
+        }
+    }
 
 	return true;
 }
@@ -79,18 +251,40 @@ dispatch_handler(int fd, struct ircmsg *msg)
 int
 main(int argc, char *argv[])
 {
+    // Compile some regexes.
+    if (regcomp(&new_pr_regex, NEW_PR_PATTERN, REG_EXTENDED)) {
+        fprintf(stderr, "Failed to compile regex.\n");
+        return 1;
+    }
+
+    // Initialize SQLite gunk.
+    int retval;
+
+    retval = sqlite3_open(DATABASE_NAME, &db);
+    if (retval) {
+        fprintf(stderr, "Failed to open database: %s\n", sqlite3_errmsg(db));
+        return 1;
+    }
+
+    retval = sqlite3_exec(db, INITIALIZE_DB, 0, 0, 0);
+    if (retval) {
+        fprintf(stderr, "Failed to initialize database: %s\n", sqlite3_errmsg(db));
+        return 1;
+    }
+ 
+    // Kick off the IRC connection.
 	char buf[BUF_LEN];
 	struct ircbuf ircbuf;
 	ircbuf_init(&ircbuf, buf, BUF_LEN);
 
-	int fd = irc_connect("irc.rizon.net", "6667");
+	int fd = irc_connect(IRC_HOST, IRC_PORT);
 	if (fd < 0) {
 		fprintf(stderr, "Failed to open connection.\n");
 		return 1;
 	}
 
-	irc_nick(fd, "prbot", NULL);
-	irc_join(fd, "#prbottest");
+	irc_nick(fd, IRC_NICK, NULL);
+	irc_join(fd, IRC_CHANNEL);
 
 	char *line;
 	while (line = irc_getline(fd, &ircbuf)) {

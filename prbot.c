@@ -104,8 +104,8 @@ insert_pr(struct prbot_pr *pr)
         // Something broke. :(
         return false;
     }
-    sqlite3_bind_text(stmt, 1, pr->nick, strlen(pr->nick), NULL);
-    sqlite3_bind_text(stmt, 2, pr->lift, strlen(pr->lift), NULL);
+    sqlite3_bind_text(stmt, 1, pr->nick, -1, NULL);
+    sqlite3_bind_text(stmt, 2, pr->lift, -1, NULL);
     sqlite3_bind_int64(stmt, 3, (sqlite3_int64) pr->date);
     sqlite3_bind_int(stmt, 4, pr->sets);
     sqlite3_bind_int(stmt, 5, pr->reps);
@@ -269,7 +269,7 @@ handle_cmd_records(int fd, struct ircmsg_privmsg *msg, char *head) {
         return false;
     }
 
-    sqlite3_bind_text(stmt, 1, head, strlen(head), NULL);
+    sqlite3_bind_text(stmt, 1, head, -1, NULL);
 
     int retval;
     do {

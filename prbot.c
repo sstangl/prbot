@@ -17,8 +17,6 @@
  * along with PRBot.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#define _GNU_SOURCE
-
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
@@ -52,9 +50,17 @@ static char INITIALIZE_DB[] =
     "    kgs REAL NOT NULL"
     ");";
 
+static char *LIFTS[] = {
+    "bench press",
+    "overhead press",
+    "squat",
+    "front squat",
+    "power clean"
+};
+
 struct prbot_pr {
-    const char *nick;
-    const char *lift;
+    char *nick;
+    char *lift;
     time_t date;
     int sets;
     int reps;
@@ -140,6 +146,9 @@ tryparse_pr(char *msg, struct prbot_pr *pr)
 #undef NUM_MATCHES
 
     pr->lift = msg + matches[1].rm_so;
+    for (char *c = pr->lift; *c != '\0'; ++c) {
+        *c = tolower(*c);
+    }
     pr->kgs = atof(msg + matches[2].rm_so);
     if (needs_conv_from_lb) {
         pr->kgs = lb2kg(pr->kgs);
@@ -177,6 +186,20 @@ handle_cmd_record(int fd, struct ircmsg_privmsg *msg, char *head)
         irc_privmsg(fd, msg->chan, "%s: check your syntax, expected: "
                                    "<lift> of <weight><unit> <sets>x<reps>",
                     msg->name.nick);
+        return false;
+    }
+
+    bool lift_ok = false;
+    for (size_t i = 0; i < sizeof LIFTS / sizeof LIFTS[0]; ++i) {
+        if (strcmp(LIFTS[i], pr.lift) == 0) {
+            lift_ok = true;
+            break;
+        }
+    }
+
+    if (!lift_ok) {
+        irc_privmsg(fd, msg->chan, "%s: sorry, I don't think \"%s\" is a real lift",
+                    msg->name.nick, pr.lift);
         return false;
     }
 
@@ -287,7 +310,7 @@ main(int argc, char *argv[])
 	irc_join(fd, IRC_CHANNEL);
 
 	char *line;
-	while (line = irc_getline(fd, &ircbuf)) {
+	while ((line = irc_getline(fd, &ircbuf))) {
 		printf("%s\n", line);
 
 		struct ircmsg msg;

@@ -254,7 +254,7 @@ parsename(char *name, struct ircname *out)
 	*atsign = '\0';
 
 	out->nick = name;
-	out->user = exclam + 2;
+	out->user = exclam + 1;
 	out->host = atsign + 1;
 	return true;
 }

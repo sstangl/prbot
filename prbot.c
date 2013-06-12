@@ -39,7 +39,7 @@
 #define IRC_NICK "prbot"
 #define IRC_CHANNEL "#prbottest"
 
-static char INITIALIZE_DB[] =
+static const char INITIALIZE_DB[] =
     "CREATE TABLE IF NOT EXISTS prs ("
     "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
     "    nick VARCHAR(255) NOT NULL,"
@@ -50,7 +50,7 @@ static char INITIALIZE_DB[] =
     "    kgs REAL NOT NULL"
     ");";
 
-static char *LIFTS[] = {
+static const char *LIFTS[] = {
     "bench press",
     "overhead press",
     "squat",
@@ -105,7 +105,7 @@ insert_pr(struct prbot_pr *pr)
     if (sqlite3_finalize(stmt)) {
         // Couldn't finalize statement.
         return false;
-    };
+    }
     return true;
 }
 

@@ -130,21 +130,21 @@ tryparse_pr(char *msg, struct prbot_pr *pr)
 #define NUM_MATCHES 7
     // There are 7 match groups:
     //
-    //   0. full string
-    //   1. lift
-    //   2. weight (whole part)
-    //   3. weight (decimal part)
-    //   4. unit
-    //   5. sets
-    //   6. reps
+    // 0. full string
+    // 1. lift
+    // 2. weight (whole part)
+    // 3. weight (decimal part)
+    // 4. unit
+    // 5. sets
+    // 6. reps
     regmatch_t matches[NUM_MATCHES];
 
     if (regexec(&new_pr_regex, msg, NUM_MATCHES, matches, 0)) {
         return false;
     }
 
-    // The regexp will match the unit, so if we match we can assume that we
-    // got either kg or lb.
+    // The regexp will match the full unit, so we can just predicate on the
+    // first character (l for lb, k for kg).
     bool needs_conv_from_lb = msg[matches[4].rm_so] == 'l';
 
     // Null-terminate some parts of the string so they can be parsed.
@@ -247,9 +247,12 @@ handle_cmd_record(int fd, struct ircmsg_privmsg *msg, char *head)
 
 static bool
 handle_cmd_records(int fd, struct ircmsg_privmsg *msg, char *head) {
-    // Normalize the nickname to lowercase, because that's what we do.
+    // Normalize the nickname to lowercase, because that keeps the database
+    // consistent (as is done in other places).
     for (char *c = head; *c != '\0'; ++c) {
         *c = tolower(*c);
+        // Also turn the trailing CR/LF to NUL so we can use the nickname as a
+        // null-terminated string.
         if (*c == '\r' || *c == '\n') {
             *c = '\0';
             break;

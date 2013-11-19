@@ -1,4 +1,5 @@
-/*
+/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * Copyright 2013 Sean Stangl (sean.stangl@gmail.com)
  * 
  * This file is part of PRBot.
@@ -173,20 +174,20 @@ tryparse_pr(char *msg, struct prbot_pr *pr)
 static bool
 handle_ping(int fd, struct ircmsg_ping *ping)
 {
-	irc_pong(fd, ping->text);
-	return true;
+    irc_pong(fd, ping->text);
+    return true;
 }
 
 static bool
 handle_part(int fd, struct ircmsg_part *part)
 {
-	return true;
+    return true;
 }
 
 static bool
 handle_join(int fd, struct ircmsg_join *join)
 {
-	return true;
+    return true;
 }
 
 static bool
@@ -325,7 +326,7 @@ finalize:
 static bool
 handle_privmsg(int fd, struct ircmsg_privmsg *msg)
 {
-	if (strstr(msg->text, IRC_NICK ": ") == msg->text && msg->chan[0] == '#') {
+    if (strstr(msg->text, IRC_NICK ": ") == msg->text && msg->chan[0] == '#') {
         char *head = msg->text + strlen(IRC_NICK) + 2;
 
         if (strstr(head, "record ") == head) {
@@ -337,27 +338,27 @@ handle_privmsg(int fd, struct ircmsg_privmsg *msg)
         }
     }
 
-	return true;
+    return true;
 }
 
 static bool
 handle_kick(int fd, struct ircmsg_kick *kick)
 {
-	return true;
+    return true;
 }
 
 static bool
 dispatch_handler(int fd, struct ircmsg *msg)
 {
-	switch (msg->type) {
-		case IRCMSG_UNKNOWN:  return true;
-		case IRCMSG_PING:     return handle_ping(fd, &msg->u.ping);
-		case IRCMSG_PART:     return handle_part(fd, &msg->u.part);
-		case IRCMSG_JOIN:     return handle_join(fd, &msg->u.join);
-		case IRCMSG_PRIVMSG:  return handle_privmsg(fd, &msg->u.privmsg);
-		case IRCMSG_KICK:     return handle_kick(fd, &msg->u.kick);
-		default:              return false;
-	}
+    switch (msg->type) {
+        case IRCMSG_UNKNOWN:  return true;
+        case IRCMSG_PING:     return handle_ping(fd, &msg->u.ping);
+        case IRCMSG_PART:     return handle_part(fd, &msg->u.part);
+        case IRCMSG_JOIN:     return handle_join(fd, &msg->u.join);
+        case IRCMSG_PRIVMSG:  return handle_privmsg(fd, &msg->u.privmsg);
+        case IRCMSG_KICK:     return handle_kick(fd, &msg->u.kick);
+        default:              return false;
+    }
 }
 
 int
@@ -385,28 +386,28 @@ main(int argc, char *argv[])
     }
  
     // Kick off the IRC connection.
-	char buf[BUF_LEN];
-	struct ircbuf ircbuf;
-	ircbuf_init(&ircbuf, buf, BUF_LEN);
+    char buf[BUF_LEN];
+    struct ircbuf ircbuf;
+    ircbuf_init(&ircbuf, buf, BUF_LEN);
 
-	int fd = irc_connect(IRC_HOST, IRC_PORT);
-	if (fd < 0) {
-		fprintf(stderr, "Failed to open connection.\n");
-		return 1;
-	}
+    int fd = irc_connect(IRC_HOST, IRC_PORT);
+    if (fd < 0) {
+        fprintf(stderr, "Failed to open connection.\n");
+        return 1;
+    }
 
-	irc_nick(fd, IRC_NICK, NULL);
-	irc_join(fd, IRC_CHANNEL);
+    irc_nick(fd, IRC_NICK, NULL);
+    irc_join(fd, IRC_CHANNEL);
 
-	char *line;
-	while ((line = irc_getline(fd, &ircbuf))) {
-		printf("%s\n", line);
+    char *line;
+    while ((line = irc_getline(fd, &ircbuf))) {
+        printf("%s\n", line);
 
-		struct ircmsg msg;
-		irc_parseline(line, &msg);
-		if (!dispatch_handler(fd, &msg))
-			return 2;
-	}
+        struct ircmsg msg;
+        irc_parseline(line, &msg);
+        if (!dispatch_handler(fd, &msg))
+            return 2;
+    }
 
-	return 0;
+    return 0;
 }

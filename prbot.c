@@ -326,17 +326,22 @@ finalize:
 static bool
 handle_privmsg(int fd, struct ircmsg_privmsg *msg)
 {
-    if (strstr(msg->text, IRC_NICK ": ") == msg->text && msg->chan[0] == '#') {
-        char *head = msg->text + strlen(IRC_NICK) + 2;
+    // Only handle messages directed at the bot.
+    if (strncmp(msg->text, IRC_NICK, strlen(IRC_NICK)) != 0)
+        return true;
 
-        if (strstr(head, "record ") == head) {
-            handle_cmd_record(fd, msg, head + 7);
-        } else if (strstr(head, "records ") == head) {
-            handle_cmd_records(fd, msg, head + 8);
-        } else {
-            irc_privmsg(fd, msg->chan, "%s: shut the fuck up.", msg->name.nick);
-        }
-    }
+    // Only handle messages in a channel.
+    if (msg->chan[0] != '#')
+        return true;
+
+    char *head = msg->text + strlen(IRC_NICK ": ");
+
+    if (strstr(head, "record ") == head)
+        handle_cmd_record(fd, msg, head + 7);
+    else if (strstr(head, "records ") == head)
+        handle_cmd_records(fd, msg, head + 8);
+    else
+        irc_privmsg(fd, msg->chan, "%s: shut the fuck up.", msg->name.nick);
 
     return true;
 }
@@ -351,13 +356,13 @@ static bool
 dispatch_handler(int fd, struct ircmsg *msg)
 {
     switch (msg->type) {
-        case IRCMSG_UNKNOWN:  return true;
-        case IRCMSG_PING:     return handle_ping(fd, &msg->u.ping);
-        case IRCMSG_PART:     return handle_part(fd, &msg->u.part);
-        case IRCMSG_JOIN:     return handle_join(fd, &msg->u.join);
-        case IRCMSG_PRIVMSG:  return handle_privmsg(fd, &msg->u.privmsg);
-        case IRCMSG_KICK:     return handle_kick(fd, &msg->u.kick);
-        default:              return false;
+      case IRCMSG_UNKNOWN:  return true;
+      case IRCMSG_PING:     return handle_ping(fd, &msg->u.ping);
+      case IRCMSG_PART:     return handle_part(fd, &msg->u.part);
+      case IRCMSG_JOIN:     return handle_join(fd, &msg->u.join);
+      case IRCMSG_PRIVMSG:  return handle_privmsg(fd, &msg->u.privmsg);
+      case IRCMSG_KICK:     return handle_kick(fd, &msg->u.kick);
+      default:              return false;
     }
 }
 
@@ -371,16 +376,12 @@ main(int argc, char *argv[])
     }
 
     // Initialize SQLite gunk.
-    int retval;
-
-    retval = sqlite3_open(DATABASE_NAME, &db);
-    if (retval) {
+    if (sqlite3_open(DATABASE_NAME, &db)) {
         fprintf(stderr, "Failed to open database: %s\n", sqlite3_errmsg(db));
         return 1;
     }
 
-    retval = sqlite3_exec(db, INITIALIZE_DB, 0, 0, 0);
-    if (retval) {
+    if (sqlite3_exec(db, INITIALIZE_DB, 0, 0, 0)) {
         fprintf(stderr, "Failed to initialize database: %s\n", sqlite3_errmsg(db));
         return 1;
     }

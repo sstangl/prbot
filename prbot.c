@@ -199,7 +199,7 @@ handle_cmd_record(int fd, struct ircmsg_privmsg *msg, char *head)
         irc_privmsg(fd, msg->chan, "%s: check your syntax, expected: "
                                    "<lift> of <weight><unit> <sets>x<reps>",
                     msg->name.nick);
-        return false;
+        return true;
     }
 
     bool lift_ok = false;
@@ -213,7 +213,7 @@ handle_cmd_record(int fd, struct ircmsg_privmsg *msg, char *head)
     if (!lift_ok) {
         irc_privmsg(fd, msg->chan, "%s: sorry, I don't think \"%s\" is a real lift",
                     msg->name.nick, pr.lift);
-        return false;
+        return true;
     }
 
     // Normalize nicknames to lowercase, so we don't get duplicates of nicknames.
@@ -228,7 +228,7 @@ handle_cmd_record(int fd, struct ircmsg_privmsg *msg, char *head)
     if (strcmp(nick_lower, "number1stunna")) {
         irc_privmsg(fd, msg->chan, "%s: haha, no.",
                     msg->name.nick);
-        return false;
+        return true;
     }
 
     pr.nick = nick_lower;
@@ -237,7 +237,7 @@ handle_cmd_record(int fd, struct ircmsg_privmsg *msg, char *head)
     if (!insert_pr(&pr)) {
         irc_privmsg(fd, msg->chan, "%s: couldn't record your PR, try again later :(",
                     msg->name.nick);
-        return false;
+        return true;
     }
 
     irc_privmsg(fd, msg->chan, "%s: recorded your PR for %s of %.2fkg %dx%d",
@@ -267,7 +267,7 @@ handle_cmd_records(int fd, struct ircmsg_privmsg *msg, char *head) {
     if (sqlite3_prepare(db, TOP_PRS, -1, &stmt, NULL) != SQLITE_OK) {
         // Something broke. :(
         irc_privmsg(fd, msg->chan, "%s: sorry, couldn't get PRs (prepare)");
-        return false;
+        return true;
     }
 
     sqlite3_bind_text(stmt, 1, head, -1, NULL);
@@ -307,7 +307,7 @@ handle_cmd_records(int fd, struct ircmsg_privmsg *msg, char *head) {
             default:
                 // Some error occured during PR retrieval.
                 irc_privmsg(fd, msg->chan, "%s: sorry, couldn't get PRs (iterate)");
-                return false;
+                return true;
         }
     } while (retval == SQLITE_ROW);
 
@@ -315,12 +315,18 @@ finalize:
     if (sqlite3_finalize(stmt)) {
         // Couldn't finalize statement.
         irc_privmsg(fd, msg->chan, "%s: sorry, couldn't get PRs (finalize)");
-        return false;
+        return true;
     }
 
     irc_privmsg(fd, msg->chan, "PRs for %s %s",
                 head, out[0] == '\0' ? "| none" : out);
-    return false;
+    return true;
+}
+
+static inline bool
+BeginsWith(char *s1, char *s2)
+{
+    return (strncasecmp(s1, s2, strlen(s2)) == 0);
 }
 
 static bool
@@ -334,15 +340,16 @@ handle_privmsg(int fd, struct ircmsg_privmsg *msg)
     if (msg->chan[0] != '#')
         return true;
 
-    char *head = msg->text + strlen(IRC_NICK ": ");
+    char *cmd = msg->text + strlen(IRC_NICK ": ");
 
-    if (strstr(head, "record ") == head)
-        handle_cmd_record(fd, msg, head + 7);
-    else if (strstr(head, "records ") == head)
-        handle_cmd_records(fd, msg, head + 8);
-    else
-        irc_privmsg(fd, msg->chan, "%s: shut the fuck up.", msg->name.nick);
+    if (BeginsWith(cmd, "help"))
+        return handle_cmd_help(fd, msg, head + 4);
+    if (BeginsWith(cmd, "record "))
+        return handle_cmd_record(fd, msg, head + 7);
+    if (BeginsWith(cmd, "records "))
+        return handle_cmd_records(fd, msg, head + 8);
 
+    irc_privmsg(fd, msg->chan, "%s: shut the fuck up.", msg->name.nick);
     return true;
 }
 
